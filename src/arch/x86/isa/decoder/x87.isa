@@ -58,7 +58,10 @@ format WarnUnimpl {
                 0x3: Inst::FSUB1(Eq);
                 default: Inst::FSUB1(Md);
             }
-            0x5: fsubr();
+            0x5: decode MODRM_MOD {
+                0x3: Inst::FSUBR1(Eq);
+                default: Inst::FSUBR1(Md);
+            }
             0x6: decode MODRM_MOD {
                 0x3: Inst::FDIV1(Eq);
                 default: Inst::FDIV1(Md);
@@ -234,12 +237,12 @@ format WarnUnimpl {
                 default: fcomp();
             }
             0x4: decode MODRM_MOD {
-                0x3: fsubr();
+                0x3: Inst::FSUBR2(Eq);
                 default: Inst::FSUB2(Mq);
             }
             0x5: decode MODRM_MOD {
                 0x3: Inst::FSUB2(Eq);
-                default: fsubr();
+                default: Inst::FSUBR2(Mq); // fsubr and fsub swap encodings for mem/reg operands...
             }
             0x6: decode MODRM_MOD {
                 0x3: fdivr();

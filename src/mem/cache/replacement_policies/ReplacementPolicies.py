@@ -96,3 +96,15 @@ class TreePLRURP(BaseReplacementPolicy):
     cxx_class = 'TreePLRURP'
     cxx_header = "mem/cache/replacement_policies/tree_plru_rp.hh"
     num_leaves = Param.Int(Parent.assoc, "Number of leaves in each tree")
+
+
+# David Akeley CS 251A stuff
+class NMRURP(BaseReplacementPolicy):
+    type = 'NMRURP'
+    cxx_class = 'NMRURP'
+    cxx_header = "mem/cache/replacement_policies/nmru_rp.hh"
+
+class LIPRP(BaseReplacementPolicy):
+    type = 'LIPRP'
+    cxx_class = 'LIPRP'
+    cxx_header = "mem/cache/replacement_policies/lip_rp.hh"

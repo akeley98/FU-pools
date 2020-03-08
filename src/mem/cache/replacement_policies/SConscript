@@ -41,3 +41,7 @@ Source('mru_rp.cc')
 Source('random_rp.cc')
 Source('second_chance_rp.cc')
 Source('tree_plru_rp.cc')
+
+# CS 251A stuff
+Source("nmru_rp.cc")
+Source("lip_rp.cc")

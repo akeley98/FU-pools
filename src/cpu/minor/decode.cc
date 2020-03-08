@@ -192,6 +192,12 @@ Decode::evaluate()
                     if (static_micro_inst->isLastMicroop()) {
                         output_inst->predictedTaken = inst->predictedTaken;
                         output_inst->predictedTarget = inst->predictedTarget;
+                        /**
+                         * We need to set triedToPredict so that when branch
+                         * signal comes back Fetch2 stage will update the 
+                         * predictor.
+                         */
+                        output_inst->triedToPredict = inst->triedToPredict;
                     }
 
                     DPRINTF(Decode, "Microop decomposition inputIndex:"

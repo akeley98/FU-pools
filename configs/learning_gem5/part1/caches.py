@@ -38,7 +38,8 @@ from __future__ import print_function
 from __future__ import absolute_import
 
 import m5
-from m5.objects import Cache
+from m5.objects import Cache, ReplacementPolicies
+NMRURP = ReplacementPolicies.NMRURP
 
 # Add the common scripts to our path
 m5.util.addToPath('../../')
@@ -51,12 +52,13 @@ from common import SimpleOpts
 class L1Cache(Cache):
     """Simple L1 Cache with default values"""
 
-    assoc = 2
+    assoc = 4
     tag_latency = 2
     data_latency = 2
     response_latency = 2
     mshrs = 4
     tgts_per_mshr = 20
+    replacement_policy = NMRURP()
 
     def __init__(self, options=None):
         super(L1Cache, self).__init__()
@@ -120,6 +122,7 @@ class L2Cache(Cache):
     response_latency = 20
     mshrs = 20
     tgts_per_mshr = 12
+    replacement_policy = NMRURP()
 
     SimpleOpts.add_option('--l2_size', help="L2 cache size. Default: %s" % size)
 

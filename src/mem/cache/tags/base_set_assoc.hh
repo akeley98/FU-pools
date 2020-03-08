@@ -53,6 +53,9 @@
 #include <string>
 #include <vector>
 
+#include <iostream> // XXX
+extern "C" int akeley_verbose;
+
 #include "base/logging.hh"
 #include "base/types.hh"
 #include "mem/cache/base.hh"
@@ -61,6 +64,7 @@
 #include "mem/cache/replacement_policies/replaceable_entry.hh"
 #include "mem/cache/tags/base.hh"
 #include "mem/cache/tags/indexing_policies/base.hh"
+#include "mem/cache/tags/indexing_policies/set_associative.hh"
 #include "mem/packet.hh"
 #include "params/BaseSetAssoc.hh"
 
@@ -169,6 +173,13 @@ class BaseSetAssoc : public BaseTags
                          const std::size_t size,
                          std::vector<CacheBlk*>& evict_blks) override
     {
+        // XXX
+        const SetAssociative* setAssociativePolicy =
+            dynamic_cast<const SetAssociative*>(indexingPolicy);
+        if (setAssociativePolicy != nullptr) {
+            akeley_verbose = (setAssociativePolicy->extractSet(addr) == 0);
+        }
+        
         // Get possible entries to be victimized
         const std::vector<ReplaceableEntry*> entries =
             indexingPolicy->getPossibleEntries(addr);
