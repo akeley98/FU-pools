@@ -885,10 +885,17 @@ InstructionQueue<Impl>::scheduleReadyInsts()
                 }
             }
 
+            int fuPoolIndex = -2;
+            bool bypass = issuing_inst->getBypassFuPoolIndex(
+                &fuPoolIndex, cpu->cycleCounter);
+
             DPRINTF(IQ, "Thread %i: Issuing instruction PC %s "
-                    "[sn:%llu]\n",
+                    "[sn:%llu] bypassing %s FU Pool %i\n",
                     tid, issuing_inst->pcState(),
-                    issuing_inst->seqNum);
+                    issuing_inst->seqNum,
+                    (bypass ? "yes" : "no"),
+                    fuPoolIndex
+                    );
 
             readyInsts[op_class].pop();
 
@@ -899,7 +906,8 @@ InstructionQueue<Impl>::scheduleReadyInsts()
                 queueOnList[op_class] = false;
             }
 
-            issuing_inst->setIssued();
+            // TODO: Record real FU Pool.
+            issuing_inst->setIssuedFuPool(idx == FUPool::NoCapableFU ? -2 : 0);
             ++total_issued;
 
 #if TRACING_ON
@@ -1060,7 +1068,13 @@ InstructionQueue<Impl>::wakeDependents(const DynInstPtr &completed_inst)
             // so that it knows which of its source registers is
             // ready.  However that would mean that the dependency
             // graph entries would need to hold the src_reg_idx.
-            dep_inst->markSrcRegReady();
+            if (dep_inst->fuPoolNotUsed()) {
+                dep_inst->markSrcRegReady();
+            }
+            else {
+                dep_inst->markSrcRegReadyFuPool(
+                    completed_inst->getFuPoolIndex(), cpu->cycleCounter);
+            }
 
             addIfReady(dep_inst);
 
@@ -1329,7 +1343,7 @@ InstructionQueue<Impl>::doSquash(ThreadID tid)
 
             // @todo: Remove this hack where several statuses are set so the
             // inst will flow through the rest of the pipeline.
-            squashed_inst->setIssued();
+            squashed_inst->setIssuedFuPool(-2);
             squashed_inst->setCanCommit();
             squashed_inst->clearInIQ();
 

@@ -534,6 +534,7 @@ FullO3CPU<Impl>::tick()
     assert(!switchedOut());
     assert(drainState() != DrainState::Drained);
 
+    cycleCounter += Cycles(1);
     ++numCycles;
     updateCycleCounters(BaseCPU::CPU_STATE_ON);
 

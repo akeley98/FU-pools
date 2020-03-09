@@ -131,8 +131,13 @@ class FullO3CPU : public BaseO3CPU
     /** Overall CPU status. */
     Status _status;
 
-  private:
+    /** Increases by one for each simulated cycle. Used for internal
+     * purposes; may not be quite the same as numCycles due to sleep,
+     * etc.
+     */
+    Cycles cycleCounter = Cycles(0);
 
+  private:
     /** The tick event used for scheduling CPU ticks. */
     EventFunctionWrapper tickEvent;
 
