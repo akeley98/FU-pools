@@ -160,7 +160,7 @@ int
 FUPool::getUnit(OpClass capability)
 {
     //  If this pool doesn't have the specified capability,
-    //  return this information to the caller
+    //  return this information to the caller.
     if (!capabilityList[capability])
         return -2;
 
@@ -182,6 +182,29 @@ FUPool::getUnit(OpClass capability)
     unitBusy[fu_idx] = true;
 
     return fu_idx;
+}
+
+int
+FUPool::getFreeUnitCount(OpClass capability)
+{
+    //  If this pool doesn't have the specified capability,
+    //  return this information to the caller.
+    if (!capabilityList[capability])
+        return -2;
+
+    int count = 0;
+    int fu_idx = fuPerCapList[capability].getFU();
+    int start_idx = fu_idx;
+
+    // Iterate through the circular queue if needed, stopping if we've reached
+    // the first element again.
+    do {
+        count += unitBusy[fu_idx] ? 0 : 1;
+        fu_idx = fuPerCapList[capability].getFU();
+    } while (fu_idx != start_idx);
+
+    assert(fu_idx < numFU);
+    return count;
 }
 
 void

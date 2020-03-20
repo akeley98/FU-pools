@@ -487,6 +487,15 @@ class InstructionQueue
      */
     Cycles commitToIEWDelay;
 
+    /** "Temporary" hacky solution: number that decides which algorithm
+     * is used for allocating instructions to FU pools for execution.
+     *
+     * 0-: greedy
+     * 1:  random
+     * 2+: load balance
+     */
+    unsigned fuPoolStrategy;
+
     /** The sequence number of the squashed instruction. */
     InstSeqNum squashedSeqNum[Impl::MaxThreads];
 
@@ -593,6 +602,13 @@ class InstructionQueue
     Stats::Scalar intAluAccesses;
     Stats::Scalar fpAluAccesses;
     Stats::Scalar vecAluAccesses;
+
+    // Register bypassing stats.
+    Stats::Scalar instsWithBypassing;
+    Stats::Scalar instsWithoutBypassing;
+    Stats::Scalar congestionBypassFails;
+    Stats::Scalar capabilityBypassFails;
+    Stats::Scalar confluenceBypassFails;
 };
 
 #endif //__CPU_O3_INST_QUEUE_HH__

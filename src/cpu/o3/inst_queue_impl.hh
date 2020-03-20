@@ -51,6 +51,7 @@
 #include <vector>
 
 #include "base/logging.hh"
+#include "base/random.hh"
 #include "cpu/o3/fu_pool.hh"
 #include "cpu/o3/inst_queue.hh"
 #include "debug/IQ.hh"
@@ -97,7 +98,8 @@ InstructionQueue<Impl>::InstructionQueue(O3CPU *cpu_ptr, IEW *iew_ptr,
       iqPolicy(params->smtIQPolicy),
       numEntries(params->numIQEntries),
       totalWidth(params->issueWidth),
-      commitToIEWDelay(params->commitToIEWDelay)
+      commitToIEWDelay(params->commitToIEWDelay),
+      fuPoolStrategy(params->fuPoolStrategy)
 {
     // Use the older, single `fuPool` parameter only if the newer
     // multiple FU Pool parameter is empty.
@@ -105,9 +107,9 @@ InstructionQueue<Impl>::InstructionQueue(O3CPU *cpu_ptr, IEW *iew_ptr,
         assert(params->fuPool != nullptr);
         fuPools.push_back(params->fuPool);
     }
-    for (FUPool* pool : fuPools) {
-        pool->dump(); // XXX
-    }
+    // for (FUPool* pool : fuPools) {
+    //     pool->dump();
+    // }
 
     numThreads = params->numThreads;
 
@@ -402,6 +404,30 @@ InstructionQueue<Impl>::regStats()
         .desc("Number of vector alu accesses")
         .flags(total);
 
+    instsWithBypassing
+        .name(name() + ".insts_with_bypassing")
+        .desc("instructions executed with bypassed operands");
+
+    instsWithoutBypassing
+        .name(name() + ".insts_without_bypassing")
+        .desc("instructions executed without any bypassed operands");
+
+    congestionBypassFails
+        .name(name() + ".congestion_bypass_fails")
+        .desc("instructions executed without bypassing because "
+              "the FU pool producing the last-arriving operand was busy.");
+
+    capabilityBypassFails
+        .name(name() + ".capability_bypass_fails")
+        .desc("instructions executed without bypassing because "
+              "the FU pool producing the last-arriving operand was not "
+              "capable of executing the instruction.");
+
+    confluenceBypassFails
+        .name(name() + ".confluence_bypass_fails")
+        .desc("instructions executed without bypassing because "
+              "there were multiple last-arriving operands produced "
+              "on different FU pools.");
 }
 
 template <class Impl>
@@ -792,6 +818,9 @@ InstructionQueue<Impl>::reserveFU(OpClass op_class, DynInstPtr issuing_inst)
     result.fuIdx = FUPool::NoCapableFU;
     result.opLatency = Cycles(1);
 
+    bool debug_print = DTRACE(IQFU) ||
+        (DTRACE(SIMDFU) && isSimdOpClass(op_class));
+
     // Change this if it turns out bypassing would be needed to
     // execute this instruction this cycle.
     result.bypassStatus = BypassStatus::NotNeeded;
@@ -824,6 +853,10 @@ InstructionQueue<Impl>::reserveFU(OpClass op_class, DynInstPtr issuing_inst)
     bool need_bypassing = issuing_inst->getBypassFuPoolIndex(
         &result.poolIdx, cpu->cycleCounter);
 
+    // Did we find a FU pool able to execute this instruction?
+    bool success = false;
+    assert(fuPools.size() > 0);
+
     // No FU needed case indicated by NoCapableFU (for some reason).
     if (op_class == No_OpClass) {
         // Nothing to do in this case.
@@ -851,35 +884,89 @@ InstructionQueue<Impl>::reserveFU(OpClass op_class, DynInstPtr issuing_inst)
                 result.fuIdx = FUPool::NoFreeFU;
             }
             else {
+                success = true;
                 result.bypassStatus = BypassStatus::Bypassed;
             }
         }
         assert(result.bypassStatus != BypassStatus::NotNeeded);
     }
     // Below this point, bypassing is not needed, so all FU pools see
-    // all the needed operands; we are free to try to schedule the
-    // instruction on any FU Pool.
+    // all the needed operands; we are free to choose any FU pool to
+    // execute this instruction, using various strategies.
 
-    // Greedy scheme (add more later?)
-    else if (1) {
-        // Try FU Pools in reverse order until we find one that can
-        // execute this instruction. ("greedy algorithm")
-        assert(fuPools.size() > 0);
-        bool success = false;
-        for (int i = int(fuPools.size()) - 1; i >= 0; --i) {
+    // Greedy scheme.  Try FU Pools in reverse order until we find one
+    // that can execute this instruction. (I don't remember why I did
+    // this in reverse order but I don't want to change it now and possibly
+    // mess up my previous sim results).
+    else if (fuPoolStrategy <= 0) {
+        for (int i = int(fuPools.size()) - 1; !success && i >= 0; --i) {
             success = try_fu(i);
-            if (success) {
-                assert(result.poolIdx >= 0 && result.fuIdx >= 0);
-                break;
-            }
         }
-        assert(success ||
-               result.fuIdx == FUPool::NoFreeFU ||
-               result.fuIdx == FUPool::NoCapableFU);
     }
 
-    if (DTRACE(IQFU) ||
-            (DTRACE(SIMDFU) && isSimdOpClass(issuing_inst->opClass()))) {
+    // Random scheme. Like the greedy scheme, except that we start probing
+    // FU pools starting from a random index.
+    else if (fuPoolStrategy == 1) {
+        auto fu_pool_count = int(fuPools.size());
+        int random_idx = random_mt.random<int>(0, fu_pool_count-1);
+        for (int i = random_idx; !success && i >= 0; --i) {
+            success = try_fu(i);
+        }
+        for (int i = fu_pool_count-1; !success && i > random_idx; --i) {
+            success = try_fu(i);
+        }
+    }
+
+    // Load balancing scheme. Select the FU pool that has the
+    // highest number of FUs ready to execute this class of
+    // instruction. (This is definitely a lazy 5 AM design; peek
+    // behind the function call boundaries and you'll see this is
+    // unreasonably expensive in simulation time).
+    else {
+        auto fu_pool_count = int(fuPools.size());
+        int maxFreeUnitCount = FUPool::NoCapableFU;
+        for (int i = 0; i < fu_pool_count; ++i) {
+            int free_count = fuPools[i]->getFreeUnitCount(op_class);
+            success |= (free_count >= 1);
+            if (free_count > maxFreeUnitCount) {
+                maxFreeUnitCount = free_count;
+                result.poolIdx = i;
+            }
+            if (debug_print) {
+                DPRINTF_UNCONDITIONAL(IQ, "op_class %d  pool %d  free %d\n",
+                    int(op_class), i, free_count);
+            }
+        }
+        if (success) {
+            FUPool* fuPool = fuPools[result.poolIdx];
+            result.fuIdx = fuPool->getUnit(op_class); // assert later
+            result.opLatency = fuPool->getOpLatency(op_class);
+            if (debug_print) {
+                DPRINTF_UNCONDITIONAL(IQ, "Chose pool %d.\n", result.poolIdx);
+            }
+        }
+        else {
+            if (debug_print) {
+                DPRINTF_UNCONDITIONAL(IQ, "No pool chosen.\n");
+            }
+            result.fuIdx = maxFreeUnitCount == FUPool::NoCapableFU
+                ? FUPool::NoCapableFU
+                : FUPool::NoFreeFU;
+        }
+    }
+
+    if (success) {
+        assert(result.poolIdx >= 0);
+        assert(result.fuIdx >= 0);
+        assert(result.poolIdx < int(fuPools.size()));
+    }
+    else {
+        assert(
+           result.fuIdx == FUPool::NoFreeFU ||
+           result.fuIdx == FUPool::NoCapableFU);
+    }
+
+    if (debug_print) {
         std::stringstream ss;
         ss << "cycleCounter " << long(cpu->cycleCounter) << ":";
         const int src_reg_count = issuing_inst->numSrcRegs();
@@ -1019,6 +1106,28 @@ InstructionQueue<Impl>::scheduleReadyInsts()
         int fu_idx = reserveResult.fuIdx;
         // Latency of this instruction's execution on the chosen FU.
         Cycles op_latency = reserveResult.opLatency;
+
+        // Collect statistics on bypassing or failure thereof.
+        switch (reserveResult.bypassStatus) {
+            case BypassStatus::Bypassed:
+                instsWithBypassing++;
+                break;
+            case BypassStatus::Congestion:
+                congestionBypassFails++;
+                break;
+            case BypassStatus::Capability:
+                capabilityBypassFails++;
+                break;
+            case BypassStatus::Confluence:
+                confluenceBypassFails++;
+                break;
+            case BypassStatus::NotNeeded:
+                instsWithoutBypassing++;
+                break;
+            default:
+                assert(0);
+                break;
+        }
 
         // Schedule if a needed FU is found. If we have an instruction
         // that doesn't require a FU, or no FU pool has the needed
