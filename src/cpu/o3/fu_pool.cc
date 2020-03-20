@@ -207,6 +207,15 @@ FUPool::processFreeUnits()
 void
 FUPool::dump()
 {
+    auto dumpUnit = [] (const FuncUnit* unit)
+    {
+        cout << unit->name;
+        for (int c = 0; c < Num_OpClasses; ++c) {
+            if (unit->provides(OpClass(c))) {
+                cout << " " << Enums::OpClassStrings[c];
+            }
+        }
+    };
     cout << "Function Unit Pool (" << name() << ")\n";
     cout << "======================================\n";
     cout << "Free List:\n";
@@ -217,9 +226,7 @@ FUPool::dump()
         }
 
         cout << "  [" << i << "] : ";
-
-        cout << funcUnits[i]->name << " ";
-
+        dumpUnit(funcUnits[i]);
         cout << "\n";
     }
 
@@ -231,9 +238,7 @@ FUPool::dump()
         }
 
         cout << "  [" << i << "] : ";
-
-        cout << funcUnits[i]->name << " ";
-
+        dumpUnit(funcUnits[i]);
         cout << "\n";
     }
 }

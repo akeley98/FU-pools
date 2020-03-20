@@ -62,6 +62,46 @@ struct DerivO3CPUParams;
 class FUPool;
 class MemInterface;
 
+/** Status code used by the FU Pool selection function, to
+ * indicate the reason for not scheduling an instruction on an FU
+ * Pool where bypassing the needed operands is possible.
+ */
+enum class BypassStatus
+{
+    // Successfully scheduled inst on an FU Pool with bypassed values.
+    Bypassed = 0,
+    // Could not bypass because the FU Pool producing the needed
+    // operand contains the needed FU type to execute this
+    // instruction, but all of those FUs are busy.
+    Congestion = 1,
+    // Could not bypass because the FU Pool producing the needed
+    // operand does not have an FU capable of executing this
+    // instruction.
+    Capability = 2,
+    // Could not bypass because multiple different FU Pools
+    // produced the needed operands for this instruction.
+    Confluence = 3,
+    // No bypassing was needed -- all operands are old enough.
+    NotNeeded = 4
+};
+
+/** Return type of FU pool selection function.  */
+struct ReserveResult
+{
+    // Reason for failure to bypass, if any.
+    BypassStatus bypassStatus;
+    // Index of the FU within the FU Pool that's chosen to execute
+    // this instruction. NoFreeFU if we failed to choose an FU and
+    // should try again later; NoCapableFU if we will execute the
+    // instruction without an FU.
+    int fuIdx;
+    // Index/number of the FU Pool that will be chosen to execute
+    // this instruction. Meaningless if fuIdx < 0.
+    int poolIdx;
+    // Latency of this instruction's execution on the chosen FU.
+    Cycles opLatency;
+};
+
 /**
  * A standard instruction queue class.  It holds ready instructions, in
  * order, in seperate priority queues to facilitate the scheduling of
@@ -273,6 +313,14 @@ class InstructionQueue
     void printInsts();
 
   private:
+    /** Given that this instruction has the given OpClass and is ready
+     * to execute, select a suitable FU from an FU pool and mark it as
+     * busy (unless no FU is needed). */
+    ReserveResult reserveFU(OpClass opClass, DynInstPtr inst);
+
+    /** Check if the given op class is a SIMD op class */
+    static bool isSimdOpClass(OpClass c);
+
     /** Does the actual squashing. */
     void doSquash(ThreadID tid);
 
@@ -305,8 +353,8 @@ class InstructionQueue
     /** Wire to read information from timebuffer. */
     typename TimeBuffer<TimeStruct>::wire fromCommit;
 
-    /** Function unit pool. */
-    FUPool *fuPool;
+    /** Function unit pools. */
+    std::vector<FUPool*> fuPools;
 
     //////////////////////////////////////
     // Instruction lists, ready queues, and ordering

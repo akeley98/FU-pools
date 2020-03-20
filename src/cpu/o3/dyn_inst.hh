@@ -171,7 +171,9 @@ class BaseO3DynInst : public BaseDynInst<Impl>
     getFuPoolIndex() const
     {
         assert(this->isIssued());
-        assert(fuPoolIndex >= 0);
+        if (fuPoolIndex < 0) {
+            assert(fuPoolIndex >= 0); // debugger hack
+        }
         return fuPoolIndex;
     }
 

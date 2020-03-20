@@ -70,7 +70,7 @@ DefaultIEW<Impl>::DefaultIEW(O3CPU *_cpu, DerivO3CPUParams *params)
       cpu(_cpu),
       instQueue(_cpu, this, params),
       ldstQueue(_cpu, this, params),
-      fuPool(params->fuPool),
+      fuPools(params->fuPools),
       commitToIEWDelay(params->commitToIEWDelay),
       renameToIEWDelay(params->renameToIEWDelay),
       issueToExecuteDelay(params->issueToExecuteDelay),
@@ -81,6 +81,15 @@ DefaultIEW<Impl>::DefaultIEW(O3CPU *_cpu, DerivO3CPUParams *params)
       wbWidth(params->wbWidth),
       numThreads(params->numThreads)
 {
+    // Use the older, single `fuPool` parameter only if the newer
+    // multiple FU Pool parameter is empty. (I'm a bit annoyed at the
+    // fragility of this, but I don't want to mess up backwards
+    // compatibility).
+    if (fuPools.size() == 0) {
+        assert(params->fuPool != nullptr);
+        fuPools.push_back(params->fuPool);
+    }
+
     if (dispatchWidth > Impl::MaxWidth)
         fatal("dispatchWidth (%d) is larger than compiled limit (%d),\n"
              "\tincrease MaxWidth in src/cpu/o3/impl.hh\n",
@@ -409,11 +418,13 @@ DefaultIEW<Impl>::isDrained() const
         drained = drained && dispatchStatus[tid] == Running;
     }
 
-    // Also check the FU pool as instructions are "stored" in FU
+    // Also check the FU pools as instructions are "stored" in FU
     // completion events until they are done and not accounted for
     // above
-    if (drained && !fuPool->isDrained()) {
-        DPRINTF(Drain, "FU pool still busy.\n");
+    bool fu_pools_drained = true;
+    for (FUPool* pool : fuPools) fu_pools_drained &= pool->isDrained();
+    if (drained && !fu_pools_drained) {
+        DPRINTF(Drain, "Some FU pools still busy.\n");
         drained = false;
     }
 
@@ -441,7 +452,7 @@ DefaultIEW<Impl>::takeOverFrom()
 
     instQueue.takeOverFrom();
     ldstQueue.takeOverFrom();
-    fuPool->takeOverFrom();
+    for (FUPool* fuPool : fuPools) fuPool->takeOverFrom();
 
     startupStage();
     cpu->activityThisCycle();
@@ -1514,7 +1525,7 @@ DefaultIEW<Impl>::tick()
     sortInsts();
 
     // Free function units marked as being freed this cycle.
-    fuPool->processFreeUnits();
+    for (FUPool* fuPool : fuPools) fuPool->processFreeUnits();
 
     list<ThreadID>::iterator threads = activeThreads->begin();
     list<ThreadID>::iterator end = activeThreads->end();

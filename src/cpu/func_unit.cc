@@ -75,7 +75,7 @@ FuncUnit::addCapability(OpClass cap, unsigned oplat, bool pipeline)
 }
 
 bool
-FuncUnit::provides(OpClass capability)
+FuncUnit::provides(OpClass capability) const
 {
     return capabilityList[capability];
 }

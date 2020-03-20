@@ -97,7 +97,7 @@ class FuncUnit
 
     void addCapability(OpClass cap, unsigned oplat, bool pipelined);
 
-    bool provides(OpClass capability);
+    bool provides(OpClass capability) const;
     std::bitset<Num_OpClasses> capabilities();
 
     unsigned &opLatency(OpClass capability);
