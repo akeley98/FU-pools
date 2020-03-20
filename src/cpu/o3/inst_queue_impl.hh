@@ -790,98 +790,94 @@ InstructionQueue<Impl>::reserveFU(OpClass op_class, DynInstPtr issuing_inst)
     ReserveResult result;
     result.poolIdx = -2;
     result.fuIdx = FUPool::NoCapableFU;
-    result.bypassStatus = BypassStatus::NotNeeded;
     result.opLatency = Cycles(1);
+
+    // Change this if it turns out bypassing would be needed to
+    // execute this instruction this cycle.
+    result.bypassStatus = BypassStatus::NotNeeded;
+
+    // Lambda that returns true iff the FU Pool with the given index
+    // (in_pool_idx) is available for executing this instruction. If
+    // so, reserve the FU and fill in the ReserveResult variables with
+    // the correct values. Otherwise, set fuIdx to NoFreeFU only if
+    // that's the reason (this has the effect of making fuIdx ==
+    // NoCapableFU only when ALL FU pools are not capable of executing
+    // this op class).
+    const auto& fuPools_ = fuPools;
+    auto try_fu =
+        [&result, &fuPools_, op_class]
+        (int in_pool_idx) -> bool
+    {
+        FUPool* fuPool = fuPools_[in_pool_idx];
+        const int idx = fuPool->getUnit(op_class);
+        if (idx >= 0) {
+            result.fuIdx = idx;
+            result.poolIdx = in_pool_idx;
+            result.opLatency = fuPool->getOpLatency(op_class);
+            return true;
+        } else if (idx == FUPool::NoFreeFU) {
+            result.fuIdx = idx;
+        }
+        return false;
+    };
+
+    bool need_bypassing = issuing_inst->getBypassFuPoolIndex(
+        &result.poolIdx, cpu->cycleCounter);
 
     // No FU needed case indicated by NoCapableFU (for some reason).
     if (op_class == No_OpClass) {
-        goto end;
+        // Nothing to do in this case.
     }
 
-    // Greedy scheme (add more later?)
-    if (1) {
-        // Return true iff the FU Pool with the given index
-        // (in_pool_idx) is available for executing this
-        // instruction. If so, reserve the FU and fill in the
-        // ReserveResult variables with the correct values. Otherwise,
-        // set fuIdx to NoFreeFU only if that's the reason (this has
-        // the effect of making fuIdx == NoCapableFU only when ALL FU
-        // pools are not capable of executing this op class).
-        const auto& fuPools_ = fuPools;
-        auto try_fu =
-            [&result, &fuPools_, op_class]
-            (int in_pool_idx) -> bool
-        {
-            FUPool* fuPool = fuPools_[in_pool_idx];
-            const int idx = fuPool->getUnit(op_class);
-            if (idx >= 0) {
-                result.fuIdx = idx;
-                result.poolIdx = in_pool_idx;
-                result.opLatency = fuPool->getOpLatency(op_class);
-                return true;
-            } else if (idx == FUPool::NoFreeFU) {
-                result.fuIdx = idx;
+    // If bypassing would be needed, try to schedule this instruction
+    // on the FU pool producing the bypassed value.
+    else if (need_bypassing) {
+        // Needed bypassed values on different FU pools -- fail.
+        if (result.poolIdx < 0) {
+            result.bypassStatus = BypassStatus::Confluence;
+            result.fuIdx = FUPool::NoFreeFU;
+        }
+        // See if the FU pool producing the bypassed value is
+        // ready to execute this instruction. If not for any
+        // reason, fail, because maybe next cycle we'll find
+        // another FU pool that is capable.
+        else {
+            try_fu(result.poolIdx);
+            if (result.fuIdx == FUPool::NoFreeFU) {
+                result.bypassStatus = BypassStatus::Congestion;
             }
-            return false;
-        };
-
-        bool need_bypassing = issuing_inst->getBypassFuPoolIndex(
-            &result.poolIdx, cpu->cycleCounter);
-
-        // If we need an FU to execute the instruction, search through
-        // the list of FU Pools and use the first one that works,
-        // unless we need bypassing to execute this cycle, in which
-        // case we can only try either 1 FU pool (the one producing
-        // the needed bypassed value), or 0 FU pools.
-        if (op_class != No_OpClass) {
-            if (need_bypassing) {
-                // Needed bypassed values on different FU pools -- fail.
-                if (result.poolIdx < 0) {
-                    result.bypassStatus = BypassStatus::Confluence;
-                    result.fuIdx = FUPool::NoFreeFU;
-                }
-                // See if the FU pool producing the bypassed value is
-                // ready to execute this instruction. If not for any
-                // reason, fail, because maybe next cycle we'll find
-                // another FU pool that is capable.
-                else {
-                    // const int i = result.poolIdx;
-                    try_fu(result.poolIdx);
-                // DPRINTF(IQ, "bypass try_fu(%d): pool_idx %d fu_idx %d\n",
-                    //    i, pool_idx, fu_idx);
-                    if (result.fuIdx == FUPool::NoFreeFU) {
-                        result.bypassStatus = BypassStatus::Congestion;
-                    }
-                    else if (result.fuIdx == FUPool::NoCapableFU) {
-                        result.bypassStatus = BypassStatus::Capability;
-                        result.fuIdx = FUPool::NoFreeFU;
-                    }
-                    else {
-                        result.bypassStatus = BypassStatus::Bypassed;
-                    }
-                }
-                assert(result.bypassStatus != BypassStatus::NotNeeded);
+            else if (result.fuIdx == FUPool::NoCapableFU) {
+                result.bypassStatus = BypassStatus::Capability;
+                result.fuIdx = FUPool::NoFreeFU;
             }
             else {
-                // All operands are old enough that no bypassing is
-                // needed, so any FU pool sees all needed operands. Try
-                // FU Pools in reverse order until we find one that can
-                // execute this instruction. ("greedy algorithm")
-                assert(fuPools.size() > 0);
-                for (int i = int(fuPools.size()) - 1; i >= 0; --i) {
-                    bool success = try_fu(i);
-                // DPRINTF(IQ, "all    try_fu(%d): pool_idx %d fu_idx %d\n",
-                    //    i, pool_idx, fu_idx);
-                    if (success) {
-                        assert(result.poolIdx >= 0 && result.fuIdx >= 0);
-                        break;
-                    }
-                }
+                result.bypassStatus = BypassStatus::Bypassed;
             }
         }
+        assert(result.bypassStatus != BypassStatus::NotNeeded);
+    }
+    // Below this point, bypassing is not needed, so all FU pools see
+    // all the needed operands; we are free to try to schedule the
+    // instruction on any FU Pool.
+
+    // Greedy scheme (add more later?)
+    else if (1) {
+        // Try FU Pools in reverse order until we find one that can
+        // execute this instruction. ("greedy algorithm")
+        assert(fuPools.size() > 0);
+        bool success = false;
+        for (int i = int(fuPools.size()) - 1; i >= 0; --i) {
+            success = try_fu(i);
+            if (success) {
+                assert(result.poolIdx >= 0 && result.fuIdx >= 0);
+                break;
+            }
+        }
+        assert(success ||
+               result.fuIdx == FUPool::NoFreeFU ||
+               result.fuIdx == FUPool::NoCapableFU);
     }
 
-end:
     if (DTRACE(IQFU) ||
             (DTRACE(SIMDFU) && isSimdOpClass(issuing_inst->opClass()))) {
         std::stringstream ss;

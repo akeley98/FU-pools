@@ -345,11 +345,17 @@ def get_processes(options):
     else:
         return multiprocesses, 1
 
+def add_fu_pool_options(parser):
+    parser.add_option(
+        "--fu_pools", type="choice", default="1",
+        choices=("1", "2", "4"),
+        help = "Number of FU pools (does not change total FU count)")
 
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
 Options.addSEOptions(parser)
 add_replacement_policy_options(parser)
+add_fu_pool_options(parser)
 
 if '--ruby' in sys.argv:
     Ruby.define_options(parser)
@@ -434,28 +440,6 @@ if options.elastic_trace_en:
 for cpu in system.cpu:
     cpu.clk_domain = system.cpu_clk_domain
 
-HalfFUPool = make_fu_pool_class(
-    int_alu=2, int_mult_div=1,
-    fp_alu=1, fp_mult_div=1,
-    simd_unit=2, pred_alu=1,
-    rdwr_port=1, ipr_port=1) ()
-
-FullFUPool = make_fu_pool_class(
-    int_alu=4, int_mult_div=2,
-    fp_alu=2, fp_mult_div=2,
-    simd_unit=4, pred_alu=2,
-    rdwr_port=2, ipr_port=2) ()
-
-DoubleFUPool = make_fu_pool_class(
-    int_alu=8, int_mult_div=4,
-    fp_alu=4, fp_mult_div=4,
-    simd_unit=8, pred_alu=4,
-    rdwr_port=4, ipr_port=4) ()
-
-cpu.fuPools = [ DoubleFUPool() ]
-# cpu.fuPools = [ FullFUPool(), FullFUPool() ]
-# cpu.fuPools = [ HalfFUPool(), HalfFUPool(), HalfFUPool(), HalfFUPool() ]
-
 if ObjectList.is_kvm_cpu(CPUClass) or ObjectList.is_kvm_cpu(FutureClass):
     if buildEnv['TARGET_ISA'] == 'x86':
         system.kvm_vm = KvmVM()
@@ -527,6 +511,33 @@ else:
     config_cache(options, system)
     MemConfig.config_mem(options, system)
     config_filesystem(system, options)
+
+HalfFUPool = make_fu_pool_class(
+    int_alu=2, int_mult_div=1,
+    fp_alu=1, fp_mult_div=1,
+    simd_unit=2, pred_alu=1,
+    rdwr_port=1, ipr_port=1) ()
+
+FullFUPool = make_fu_pool_class(
+    int_alu=4, int_mult_div=2,
+    fp_alu=2, fp_mult_div=2,
+    simd_unit=4, pred_alu=2,
+    rdwr_port=2, ipr_port=2) ()
+
+DoubleFUPool = make_fu_pool_class(
+    int_alu=8, int_mult_div=4,
+    fp_alu=4, fp_mult_div=4,
+    simd_unit=8, pred_alu=4,
+    rdwr_port=4, ipr_port=4) ()
+
+if options.fu_pools == "1":
+    cpu.fuPools = [ DoubleFUPool() ]
+elif options.fu_pools == "2":
+    cpu.fuPools = [ FullFUPool(), FullFUPool() ]
+elif options.fu_pools == "4":
+    cpu.fuPools = [ HalfFUPool(), HalfFUPool(), HalfFUPool(), HalfFUPool() ]
+else:
+    assert 0, ("Unknown --fu_pools option %s" % options.fu_pools)
 
 root = Root(full_system = False, system = system)
 Simulation.run(options, root, system, FutureClass)
