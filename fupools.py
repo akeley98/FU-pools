@@ -255,17 +255,12 @@ def main(j=None):
 
 # Given a benchmark_category (identifies the kind of CPU simulated;
 # the part before . in a benchmark name), return the average speedup
-# the benchmark had over the nmrurp baseline on every benchmark
-# executable, based on the final_tick stat (total picoseconds?). This
-# equalizes the influence longer-running executables have on the
-# overall benchmark.
-#
-# If a specific executable_name is given, return the speedup over
-# baseline for that executable only.
-def speed_over_baseline(benchmark_category, executable_name=None):
+# the benchmark had over thebaseline for the given benchmark
+# executable, based on the final_tick stat (total picoseconds?).
+def speed_over_baseline(benchmark_category, executable_name, baseline_config):
     if executable_name is not None:
         benchmark_name = benchmark_category + '.' + executable_name
-        baseline_name = 'baseline.' + executable_name
+        baseline_name = baseline_config + '.' + executable_name
         return (get_stats(baseline_name)["final_tick"] /
                 get_stats(benchmark_name)["final_tick"])
     else:
@@ -296,7 +291,7 @@ def stats_row(config, workload, baseline_config='baseline'):
     delta_percent = 100 * numer / denom - percent_bypassed
 
     return format % (
-        100 * (1-speed_over_baseline(config, workload)),
+        100 * (1-speed_over_baseline(config, workload, baseline_config)),
         percent_bypassed,
         delta_percent,
         stats["system.cpu.iq.congestion_bypass_fails"] * 1e-6,
@@ -329,3 +324,37 @@ def write_tex_tables():
     for workload in benchmark_executables:
         file_name = "./%s-fu-pool-table.tex" % workload
         open(file_name, 'w').write(generate_table_for_workload(workload))
+
+# Generate a table of stats rows for every system configuration
+# (variation with higher number of memory units).
+def mm_generate_table_for_workload(workload):
+    lines = []
+    lines.append(r"\begin{tabular}{|r c|r r r r r|}")
+    lines.append(r"\hline")
+    lines.append(r"& & \% slowdown & \% insts & \(-\Delta\)\% points & congestion & confluence \\")
+    lines.append(r"strategy & FU pools & from complete & bypassed & bypassed & (million insts) & (million insts) \\")
+    lines.append(r"\hline")
+
+    lines.append(" complete & 1 & " + stats_row("baseline", workload))
+    lines.append(" mm-complete & 1 & " + stats_row("mm-1", workload, "mm-1"))
+    for pools in (2,4):
+        lines.append(r"\hline")
+        for strat in ("greedy", "random", "balance"):
+            row = "%s & %i & " % (strat, pools)
+            row += stats_row(strat+str(pools), workload)
+            lines.append(row)
+        lines.append(r"\hline")
+        for strat in ("greedy", "random", "balance"):
+            row = "%s & %i & " % ("mm-" + strat, pools)
+            row += stats_row("mm-"+strat+str(pools), workload, "mm-1")
+            lines.append(row)
+
+    lines.append(r"\hline")
+    lines.append(r"\end{tabular}")
+    lines.append("")
+    return '\n'.join(lines)
+
+def mm_write_tex_tables():
+    for workload in benchmark_executables:
+        file_name = "./mm-%s-fu-pool-table.tex" % workload
+        open(file_name, 'w').write(mm_generate_table_for_workload(workload))
