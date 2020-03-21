@@ -355,6 +355,9 @@ def add_fu_pool_options(parser):
         choices=("greedy", "random", "balance"),
         help = "Strategy used for assigning selecting which FU pool "
                "to execute an instruction on.")
+    parser.add_option(
+        "--fu_pool_more_mem", type="int", default=0,
+        help = "Whether to use an unrealistically large number of mem ports.")
 
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
@@ -523,11 +526,23 @@ HalfFUPool = make_fu_pool_class(
     simd_unit=3, pred_alu=1,
     rdwr_port=1, ipr_port=1) ()
 
+HalfFUPoolMoreMem = make_fu_pool_class(
+    int_alu=3, int_mult_div=1,
+    fp_alu=1, fp_mult_div=1,
+    simd_unit=3, pred_alu=1,
+    read_port=2, write_port=1, ipr_port=1) ()
+
 FullFUPool = make_fu_pool_class(
     int_alu=6, int_mult_div=2,
     fp_alu=2, fp_mult_div=2,
     simd_unit=6, pred_alu=2,
     rdwr_port=2, ipr_port=2) ()
+
+FullFUPoolMoreMem = make_fu_pool_class(
+    int_alu=6, int_mult_div=2,
+    fp_alu=2, fp_mult_div=2,
+    simd_unit=6, pred_alu=2,
+    read_port=4, write_port=2, ipr_port=2) ()
 
 DoubleFUPool = make_fu_pool_class(
     int_alu=12, int_mult_div=4,
@@ -535,14 +550,31 @@ DoubleFUPool = make_fu_pool_class(
     simd_unit=12, pred_alu=4,
     rdwr_port=4, ipr_port=4) ()
 
-if options.fu_pools == "1":
-    cpu.fuPools = [ DoubleFUPool() ]
-elif options.fu_pools == "2":
-    cpu.fuPools = [ FullFUPool(), FullFUPool() ]
-elif options.fu_pools == "4":
-    cpu.fuPools = [ HalfFUPool(), HalfFUPool(), HalfFUPool(), HalfFUPool() ]
+DoubleFUPoolMoreMem = make_fu_pool_class(
+    int_alu=12, int_mult_div=4,
+    fp_alu=4, fp_mult_div=4,
+    simd_unit=12, pred_alu=4,
+    read_port=8, write_port=4, ipr_port=4) ()
+
+if options.fu_pool_more_mem:
+    if options.fu_pools == "1":
+        cpu.fuPools = [ DoubleFUPoolMoreMem() ]
+    elif options.fu_pools == "2":
+        cpu.fuPools = [ FullFUPoolMoreMem(), FullFUPoolMoreMem() ]
+    elif options.fu_pools == "4":
+        cpu.fuPools = [ HalfFUPoolMoreMem(), HalfFUPoolMoreMem(),
+                        HalfFUPoolMoreMem(), HalfFUPoolMoreMem() ]
+    else:
+        raise ValueError("Unknown --fu_pools option %r" % options.fu_pools)
 else:
-    raise ValueError("Unknown --fu_pools option %r" % options.fu_pools)
+    if options.fu_pools == "1":
+        cpu.fuPools = [ DoubleFUPool() ]
+    elif options.fu_pools == "2":
+        cpu.fuPools = [ FullFUPool(), FullFUPool() ]
+    elif options.fu_pools == "4":
+        cpu.fuPools = [ HalfFUPool(), HalfFUPool(), HalfFUPool(), HalfFUPool() ]
+    else:
+        raise ValueError("Unknown --fu_pools option %r" % options.fu_pools)
 
 if options.fu_pool_strategy == "greedy":
     cpu.fuPoolStrategy = 0 # This should really be better...
