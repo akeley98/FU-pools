@@ -37,6 +37,7 @@
 #include "cpu/o3/decode.hh"
 #include "cpu/o3/fetch.hh"
 #include "cpu/o3/free_list.hh"
+#include "cpu/o3/fu_pools_strategy.hh"
 #include "cpu/o3/iew.hh"
 #include "cpu/o3/inst_queue.hh"
 #include "cpu/o3/lsq.hh"

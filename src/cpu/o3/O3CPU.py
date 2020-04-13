@@ -113,8 +113,11 @@ class DerivO3CPU(BaseCPU):
     dispatchWidth = Param.Unsigned(8, "Dispatch width")
     issueWidth = Param.Unsigned(8, "Issue width")
     wbWidth = Param.Unsigned(8, "Writeback width")
-    fuPool = Param.FUPool(DefaultFUPool(), "Functional Unit pool")
-
+    fuPool = Param.FUPool(DefaultFUPool(), "Functional Unit pool. "
+                        "(Use fuPools to provide multiple FU Pools).")
+    fuPools = VectorParam.FUPool([], "List of functional unit pools. "
+                                     "Overrides fuPool if non-empty.")
+    fuPoolStrategy = Param.Unsigned(0, "FU pool selection strategy number.")
     iewToCommitDelay = Param.Cycles(1, "Issue/Execute/Writeback to commit "
                "delay")
     renameToROBDelay = Param.Cycles(1, "Rename to reorder buffer delay")

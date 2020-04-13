@@ -61,6 +61,7 @@
 struct DerivO3CPUParams;
 class FUPool;
 class MemInterface;
+struct ReserveResult;
 
 /**
  * A standard instruction queue class.  It holds ready instructions, in
@@ -77,7 +78,6 @@ class MemInterface;
  * requiring IEW to be able to peek into the IQ. At the end of the execution
  * latency, the instruction is put into the queue to execute, where it will
  * have the execute() function called on it.
- * @todo: Make IQ able to handle multiple FU pools.
  */
 template <class Impl>
 class InstructionQueue
@@ -86,6 +86,7 @@ class InstructionQueue
     //Typedefs from the Impl.
     typedef typename Impl::O3CPU O3CPU;
     typedef typename Impl::DynInstPtr DynInstPtr;
+    typedef typename Impl::FUPoolsStrategy FUPoolsStrategy;
 
     typedef typename Impl::CPUPol::IEW IEW;
     typedef typename Impl::CPUPol::MemDepUnit MemDepUnit;
@@ -273,6 +274,11 @@ class InstructionQueue
     void printInsts();
 
   private:
+    /** Given that this instruction has the given OpClass and is ready
+     * to execute, select a suitable FU from an FU pool and mark it as
+     * busy (unless no FU is needed). */
+    ReserveResult reserveFU(OpClass opClass, DynInstPtr inst);
+
     /** Does the actual squashing. */
     void doSquash(ThreadID tid);
 
@@ -305,8 +311,11 @@ class InstructionQueue
     /** Wire to read information from timebuffer. */
     typename TimeBuffer<TimeStruct>::wire fromCommit;
 
-    /** Function unit pool. */
-    FUPool *fuPool;
+    /** Function unit pools. */
+    std::vector<FUPool*> fuPools;
+
+    /** FU pool selection strategy / bypass network. */
+    FUPoolsStrategy fuPoolsStrategy;
 
     //////////////////////////////////////
     // Instruction lists, ready queues, and ordering
@@ -545,6 +554,13 @@ class InstructionQueue
     Stats::Scalar intAluAccesses;
     Stats::Scalar fpAluAccesses;
     Stats::Scalar vecAluAccesses;
+
+    // Register bypassing stats.
+    Stats::Scalar instsWithBypassing;
+    Stats::Scalar instsWithoutBypassing;
+    Stats::Scalar congestionBypassFails;
+    Stats::Scalar capabilityBypassFails;
+    Stats::Scalar confluenceBypassFails;
 };
 
 #endif //__CPU_O3_INST_QUEUE_HH__

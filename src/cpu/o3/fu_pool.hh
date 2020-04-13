@@ -148,6 +148,15 @@ class FUPool : public SimObject
      */
     int getUnit(OpClass capability);
 
+    /**
+     * Get the number of FUs currently available for executing
+     * instructions of the given OpClass. Does NOT mark any unit as
+     * busy. Returns 0 if there is no free FU, but still returns
+     * NoCapableFU, like getUnit, if this FU Pool lacks the needed
+     * capability.
+     */
+    int getFreeUnitCount(OpClass capability);
+
     /** Frees a FU at the end of this cycle. */
     void freeUnitNextCycle(int fu_idx);
 

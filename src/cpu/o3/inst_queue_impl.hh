@@ -46,12 +46,17 @@
 #define __CPU_O3_INST_QUEUE_IMPL_HH__
 
 #include <limits>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "base/logging.hh"
 #include "cpu/o3/fu_pool.hh"
+#include "cpu/o3/fu_pools_strategy.hh"
 #include "cpu/o3/inst_queue.hh"
 #include "debug/IQ.hh"
+#include "debug/IQFU.hh"
+#include "debug/SIMDFU.hh"
 #include "enums/OpClass.hh"
 #include "params/DerivO3CPU.hh"
 #include "sim/core.hh"
@@ -89,13 +94,18 @@ InstructionQueue<Impl>::InstructionQueue(O3CPU *cpu_ptr, IEW *iew_ptr,
                                          DerivO3CPUParams *params)
     : cpu(cpu_ptr),
       iewStage(iew_ptr),
-      fuPool(params->fuPool),
+      fuPools(cpu_ptr->fuPools),
+      fuPoolsStrategy(cpu_ptr, params),
       iqPolicy(params->smtIQPolicy),
       numEntries(params->numIQEntries),
       totalWidth(params->issueWidth),
       commitToIEWDelay(params->commitToIEWDelay)
 {
-    assert(fuPool);
+    assert(fuPools.size() != 0);
+    for (FUPool* pool : fuPools) {
+    //    pool->dump();
+        assert(pool != nullptr);
+    }
 
     numThreads = params->numThreads;
 
@@ -390,6 +400,30 @@ InstructionQueue<Impl>::regStats()
         .desc("Number of vector alu accesses")
         .flags(total);
 
+    instsWithBypassing
+        .name(name() + ".insts_with_bypassing")
+        .desc("instructions executed with bypassed operands");
+
+    instsWithoutBypassing
+        .name(name() + ".insts_without_bypassing")
+        .desc("instructions executed without any bypassed operands");
+
+    congestionBypassFails
+        .name(name() + ".congestion_bypass_fails")
+        .desc("instructions executed without bypassing because "
+              "the FU pool producing the last-arriving operand was busy.");
+
+    capabilityBypassFails
+        .name(name() + ".capability_bypass_fails")
+        .desc("instructions executed without bypassing because "
+              "the FU pool producing the last-arriving operand was not "
+              "capable of executing the instruction.");
+
+    confluenceBypassFails
+        .name(name() + ".confluence_bypass_fails")
+        .desc("instructions executed without bypassing because "
+              "there were multiple last-arriving operands produced "
+              "on different FU pools.");
 }
 
 template <class Impl>
@@ -758,8 +792,9 @@ InstructionQueue<Impl>::processFUCompletion(const DynInstPtr &inst, int fu_idx)
    --wbOutstanding;
     iewStage->wakeCPU();
 
-    if (fu_idx > -1)
-        fuPool->freeUnitNextCycle(fu_idx);
+    if (fu_idx > -1) {
+        fuPools[inst->getExecuteFuPoolIndex()]->freeUnitNextCycle(fu_idx);
+    }
 
     // @todo: Ensure that these FU Completions happen at the beginning
     // of a cycle, otherwise they could add too many instructions to
@@ -836,12 +871,7 @@ InstructionQueue<Impl>::scheduleReadyInsts()
             continue;
         }
 
-        int idx = FUPool::NoCapableFU;
-        Cycles op_latency = Cycles(1);
-        ThreadID tid = issuing_inst->threadNumber;
-
         if (op_class != No_OpClass) {
-            idx = fuPool->getUnit(op_class);
             if (issuing_inst->isFloating()) {
                 fpAluAccesses++;
             } else if (issuing_inst->isVector()) {
@@ -849,28 +879,76 @@ InstructionQueue<Impl>::scheduleReadyInsts()
             } else {
                 intAluAccesses++;
             }
-            if (idx > FUPool::NoFreeFU) {
-                op_latency = fuPool->getOpLatency(op_class);
-            }
+        }
+        ThreadID tid = issuing_inst->threadNumber;
+
+        // Try to reserve an FU to execute this instruction.
+        ReserveResult reserveResult =
+            fuPoolsStrategy.reserveFU(op_class, issuing_inst);
+        // Index/number of the FU Pool that will be chosen to execute
+        // this instruction.
+        int pool_idx = reserveResult.poolIdx;
+        // Index of the FU within said FU Pool that's chosen to execute
+        // this instruction.
+        int fu_idx = reserveResult.fuIdx;
+        // Latency of this instruction's execution on the chosen FU.
+        Cycles op_latency = reserveResult.opLatency;
+
+        // Collect statistics on bypassing or failure thereof.
+        switch (reserveResult.bypassStatus) {
+            case BypassStatus::Bypassed:
+                instsWithBypassing++;
+                break;
+            case BypassStatus::Congestion:
+                congestionBypassFails++;
+                break;
+            case BypassStatus::Capability:
+                capabilityBypassFails++;
+                break;
+            case BypassStatus::Confluence:
+                confluenceBypassFails++;
+                break;
+            case BypassStatus::NotNeeded:
+                instsWithoutBypassing++;
+                break;
+            default:
+                assert(0);
+                break;
         }
 
-        // If we have an instruction that doesn't require a FU, or a
-        // valid FU, then schedule for execution.
-        if (idx != FUPool::NoFreeFU) {
+        // Schedule if a needed FU is found. If we have an instruction
+        // that doesn't require a FU, or no FU pool has the needed
+        // capability for this instruction, then also schedule for
+        // execution (indicated by fu_idx == FUPool::NoCapableFU).
+        if (fu_idx != FUPool::NoFreeFU) {
+            FUPool* fuPool = nullptr;
+            if (fu_idx != FUPool::NoCapableFU) {
+                assert(pool_idx >= 0);
+                fuPool = fuPools[pool_idx];
+            } else {
+                // If no FU Pool was capable (or no FU was needed?,
+                // I'm trying to wrap my head around all possible
+                // meanings of NoCapableFU the original author used),
+                // arbitrarily choose pool 0 as the FU Pool, to match
+                // the old behaviour.
+                pool_idx = -2;
+                fuPool = fuPools[0];
+            }
+
             if (op_latency == Cycles(1)) {
                 i2e_info->size++;
                 instsToExecute.push_back(issuing_inst);
 
                 // Add the FU onto the list of FU's to be freed next
                 // cycle if we used one.
-                if (idx >= 0)
-                    fuPool->freeUnitNextCycle(idx);
+                if (fu_idx >= 0)
+                    fuPool->freeUnitNextCycle(fu_idx);
             } else {
                 bool pipelined = fuPool->isPipelined(op_class);
                 // Generate completion event for the FU
                 ++wbOutstanding;
                 FUCompletion *execution = new FUCompletion(issuing_inst,
-                                                           idx, this);
+                                                           fu_idx, this);
 
                 cpu->schedule(execution,
                               cpu->clockEdge(Cycles(op_latency - 1)));
@@ -881,14 +959,18 @@ InstructionQueue<Impl>::scheduleReadyInsts()
                     execution->setFreeFU();
                 } else {
                     // Add the FU onto the list of FU's to be freed next cycle.
-                    fuPool->freeUnitNextCycle(idx);
+                    fuPool->freeUnitNextCycle(fu_idx);
                 }
             }
 
             DPRINTF(IQ, "Thread %i: Issuing instruction PC %s "
-                    "[sn:%llu]\n",
+                    "[sn:%llu] bypassing %s FU Pool %i\n",
                     tid, issuing_inst->pcState(),
-                    issuing_inst->seqNum);
+                    issuing_inst->seqNum,
+                    (reserveResult.bypassStatus != BypassStatus::NotNeeded
+                        ? "yes" : "no"),
+                    pool_idx
+                    );
 
             readyInsts[op_class].pop();
 
@@ -899,7 +981,8 @@ InstructionQueue<Impl>::scheduleReadyInsts()
                 queueOnList[op_class] = false;
             }
 
-            issuing_inst->setIssued();
+            // Mark the instruction as issued & record the FU Pool used.
+            issuing_inst->setIssuedFuPool(pool_idx);
             ++total_issued;
 
 #if TRACING_ON
@@ -919,6 +1002,10 @@ InstructionQueue<Impl>::scheduleReadyInsts()
             listOrder.erase(order_it++);
             statIssuedInstType[tid][op_class]++;
         } else {
+            // TODO: Now we might have an "FU Busy" stat increase
+            // because a needed source reg is produced on another FU
+            // and could not be bypassed to an available FU this
+            // cycle. Collect statistics on this?
             statFuBusy[op_class]++;
             fuBusy[tid]++;
             ++order_it;
@@ -929,9 +1016,9 @@ InstructionQueue<Impl>::scheduleReadyInsts()
     iqInstsIssued+= total_issued;
 
     // If we issued any instructions, tell the CPU we had activity.
-    // @todo If the way deferred memory instructions are handeled due to
-    // translation changes then the deferredMemInsts condition should be removed
-    // from the code below.
+    // @todo If the way deferred memory instructions are handeled due
+    // to translation changes then the deferredMemInsts condition
+    // should be removed from the code below.
     if (total_issued || !retryMemInsts.empty() || !deferredMemInsts.empty()) {
         cpu->activityThisCycle();
     } else {
@@ -1051,6 +1138,28 @@ InstructionQueue<Impl>::wakeDependents(const DynInstPtr &completed_inst)
         //Go through the dependency chain, marking the registers as
         //ready within the waiting instructions.
         DynInstPtr dep_inst = dependGraph.pop(dest_reg->flatIndex());
+        const int pool_idx = completed_inst->fuPoolNotUsed()
+            ? -1
+            : completed_inst->getExecuteFuPoolIndex();
+
+        // Tracing code; skip me.
+        if (DTRACE(IQFU) ||
+                (DTRACE(SIMDFU) && isSimdOpClass(completed_inst->opClass()))) {
+            using namespace Debug;
+            if (pool_idx < 0) {
+                DPRINTF_UNCONDITIONAL(IQ,
+                    "cycleCounter %llu: r%d produced without FU.\n",
+                    (unsigned long long)(cpu->cycleCounter),
+                    int(dest_reg->index()));
+            }
+            else {
+                DPRINTF_UNCONDITIONAL(IQ,
+                    "cycleCounter %llu: r%d produced on FU pool %d.\n",
+                    (unsigned long long)(cpu->cycleCounter),
+                    int(dest_reg->index()),
+                    int(pool_idx));
+            }
+        }
 
         while (dep_inst) {
             DPRINTF(IQ, "Waking up a dependent instruction, [sn:%llu] "
@@ -1060,7 +1169,12 @@ InstructionQueue<Impl>::wakeDependents(const DynInstPtr &completed_inst)
             // so that it knows which of its source registers is
             // ready.  However that would mean that the dependency
             // graph entries would need to hold the src_reg_idx.
-            dep_inst->markSrcRegReady();
+            if (pool_idx < 0) {
+                dep_inst->markSrcRegReady();
+            }
+            else {
+                dep_inst->markSrcRegReadyFuPool(pool_idx, cpu->cycleCounter);
+            }
 
             addIfReady(dep_inst);
 
@@ -1329,7 +1443,7 @@ InstructionQueue<Impl>::doSquash(ThreadID tid)
 
             // @todo: Remove this hack where several statuses are set so the
             // inst will flow through the rest of the pipeline.
-            squashed_inst->setIssued();
+            squashed_inst->setIssuedFuPool(-2);
             squashed_inst->setCanCommit();
             squashed_inst->clearInIQ();
 

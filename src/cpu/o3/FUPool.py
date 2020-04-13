@@ -36,7 +36,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# Authors: Kevin Lim
+# Authors: Kevin Lim, David Zhao Akeley
 
 from m5.SimObject import SimObject
 from m5.params import *
@@ -51,3 +51,29 @@ class FUPool(SimObject):
 class DefaultFUPool(FUPool):
     FUList = [ IntALU(), IntMultDiv(), FP_ALU(), FP_MultDiv(), ReadPort(),
                SIMD_Unit(), PredALU(), WritePort(), RdWrPort(), IprPort() ]
+
+# Make a subclass of FUPool that contains the given number of each
+# type of functional unit. For example,
+#
+# make_fu_pool_class(int_alu=4, int_mult_div=1)()
+#
+# Creates an FU Pool type consisting of 4 int ALUs and 1 int mult/div
+# unit, and then instantiates one instance of said FU Pool.
+def make_fu_pool_class(int_alu=0, int_mult_div=0, fp_alu=0,
+                       fp_mult_div=0, read_port=0, simd_unit=0,
+                       pred_alu=0, write_port=0, rdwr_port=0, ipr_port=0):
+    unit_types = [ IntALU, IntMultDiv, FP_ALU, FP_MultDiv, ReadPort,
+                   SIMD_Unit, PredALU, WritePort, RdWrPort, IprPort ]
+    args = (int_alu, int_mult_div, fp_alu, fp_mult_div, read_port,
+            simd_unit, pred_alu, write_port, rdwr_port, ipr_port)
+    outer_fu_list = []
+    for i, count in enumerate(args):
+        if count <= 0: continue
+        unit = unit_types[i]()
+        unit.count = count
+        outer_fu_list.append(unit)
+
+    class GeneratedFUPool(FUPool):
+        FUList = outer_fu_list
+
+    return GeneratedFUPool

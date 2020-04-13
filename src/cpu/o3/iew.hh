@@ -361,8 +361,9 @@ class DefaultIEW
     /** Load / store queue. */
     LSQ ldstQueue;
 
-    /** Pointer to the functional unit pool. */
-    FUPool *fuPool;
+    /** Function unit pools. */
+    std::vector<FUPool*> fuPools;
+
     /** Records if the LSQ needs to be updated on the next cycle, so that
      * IEW knows if there will be activity on the next cycle.
      */

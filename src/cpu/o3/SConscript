@@ -62,6 +62,8 @@ if 'O3CPU' in env['CPU_MODELS']:
     DebugFlag('CommitRate')
     DebugFlag('IEW')
     DebugFlag('IQ')
+    DebugFlag('IQFU')
+    DebugFlag('SIMDFU')
     DebugFlag('LSQ')
     DebugFlag('LSQUnit')
     DebugFlag('MemDepUnit')

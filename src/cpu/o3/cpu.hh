@@ -131,8 +131,13 @@ class FullO3CPU : public BaseO3CPU
     /** Overall CPU status. */
     Status _status;
 
-  private:
+    /** Increases by one for each simulated cycle. Used for internal
+     * purposes; may not be quite the same as numCycles due to sleep,
+     * etc.
+     */
+    Cycles cycleCounter = Cycles(0);
 
+  private:
     /** The tick event used for scheduling CPU ticks. */
     EventFunctionWrapper tickEvent;
 
@@ -554,6 +559,11 @@ class FullO3CPU : public BaseO3CPU
      *  being retired or squashed.
      */
     bool removeInstsThisCycle;
+
+    /** The function unit pool(s) available to the CPU. Must be
+     *  declared before IEW stage.
+     */
+    const std::vector<FUPool*> fuPools;
 
   protected:
     /** The fetch stage. */

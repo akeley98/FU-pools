@@ -160,7 +160,7 @@ int
 FUPool::getUnit(OpClass capability)
 {
     //  If this pool doesn't have the specified capability,
-    //  return this information to the caller
+    //  return this information to the caller.
     if (!capabilityList[capability])
         return -2;
 
@@ -182,6 +182,29 @@ FUPool::getUnit(OpClass capability)
     unitBusy[fu_idx] = true;
 
     return fu_idx;
+}
+
+int
+FUPool::getFreeUnitCount(OpClass capability)
+{
+    //  If this pool doesn't have the specified capability,
+    //  return this information to the caller.
+    if (!capabilityList[capability])
+        return -2;
+
+    int count = 0;
+    int fu_idx = fuPerCapList[capability].getFU();
+    int start_idx = fu_idx;
+
+    // Iterate through the circular queue if needed, stopping if we've reached
+    // the first element again.
+    do {
+        count += unitBusy[fu_idx] ? 0 : 1;
+        fu_idx = fuPerCapList[capability].getFU();
+    } while (fu_idx != start_idx);
+
+    assert(fu_idx < numFU);
+    return count;
 }
 
 void
@@ -207,6 +230,16 @@ FUPool::processFreeUnits()
 void
 FUPool::dump()
 {
+    auto dumpUnit = [] (const FuncUnit* unit_ptr)
+    {
+        FuncUnit& unit = *const_cast<FuncUnit*>(unit_ptr);
+        cout << unit.name;
+        for (int c = 0; c < Num_OpClasses; ++c) {
+            if (unit.provides(OpClass(c))) {
+                cout << " " << Enums::OpClassStrings[c];
+            }
+        }
+    };
     cout << "Function Unit Pool (" << name() << ")\n";
     cout << "======================================\n";
     cout << "Free List:\n";
@@ -217,9 +250,7 @@ FUPool::dump()
         }
 
         cout << "  [" << i << "] : ";
-
-        cout << funcUnits[i]->name << " ";
-
+        dumpUnit(funcUnits[i]);
         cout << "\n";
     }
 
@@ -231,9 +262,7 @@ FUPool::dump()
         }
 
         cout << "  [" << i << "] : ";
-
-        cout << funcUnits[i]->name << " ";
-
+        dumpUnit(funcUnits[i]);
         cout << "\n";
     }
 }

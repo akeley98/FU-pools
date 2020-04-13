@@ -90,6 +90,20 @@ BaseO3CPU::regStats()
     BaseCPU::regStats();
 }
 
+// Backwards-compatibility hack: this CPU supports multiple fu pools
+// via the `fuPools` parameter, but still supports the older single
+// `fuPool` parameter as a fallback if the `fuPools` parameter is
+// in its default empty state.
+namespace {
+std::vector<FUPool*> getFuPoolsVector(DerivO3CPUParams *params)
+{
+    std::vector<FUPool*> pools = params->fuPools;
+    if (pools.size() == 0) pools.push_back(params->fuPool);
+    for (FUPool* pool : pools) assert(pool != nullptr);
+    return pools;
+}
+}
+
 template <class Impl>
 FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
     : BaseO3CPU(params),
@@ -103,6 +117,7 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
       instcount(0),
 #endif
       removeInstsThisCycle(false),
+      fuPools(getFuPoolsVector(params)),
       fetch(this, params),
       decode(this, params),
       rename(this, params),
@@ -534,6 +549,7 @@ FullO3CPU<Impl>::tick()
     assert(!switchedOut());
     assert(drainState() != DrainState::Drained);
 
+    cycleCounter += Cycles(1);
     ++numCycles;
     updateCycleCounters(BaseCPU::CPU_STATE_ON);
 

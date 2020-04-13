@@ -70,6 +70,9 @@ struct O3CPUImpl
     /** The O3CPU type to be used. */
     typedef FullO3CPU<O3CPUImpl> O3CPU;
 
+    /** Model for bypassing between functional units. */
+    typedef DefaultFUPoolsStrategy<O3CPUImpl> FUPoolsStrategy;
+
     /** Same typedef, but for CPUType.  BaseDynInst may not always use
      * an O3 CPU, so it's clearer to call it CPUType instead in that
      * case.
